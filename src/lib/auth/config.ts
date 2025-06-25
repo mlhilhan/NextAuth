@@ -1,14 +1,13 @@
 import { NextAuthOptions } from "next-auth";
-import { JWT } from "next-auth/jwt";
 import Auth0Provider from "next-auth/providers/auth0";
-import { ExtendedSession, ExtendedJWT, UserRole } from "@/types/auth";
+import { UserRole } from "@/types/auth";
 
 export const authOptions: NextAuthOptions = {
   providers: [
     Auth0Provider({
       clientId: process.env.AUTH0_CLIENT_ID!,
       clientSecret: process.env.AUTH0_CLIENT_SECRET!,
-      issuer: process.env.AUTH0_ISSUER_BASE_URL,
+      issuer: process.env.AUTH0_ISSUER_BASE_URL!,
       authorization: {
         params: {
           scope: "openid email profile",
@@ -19,37 +18,27 @@ export const authOptions: NextAuthOptions = {
 
   session: {
     strategy: "jwt",
-    maxAge: 24 * 60 * 60, // 24 hours
-  },
-
-  jwt: {
-    secret: process.env.NEXTAUTH_SECRET,
-    maxAge: 24 * 60 * 60,
+    maxAge: 24 * 60 * 60, // 24 saat
   },
 
   callbacks: {
-    async jwt({ token, user, account }): Promise<ExtendedJWT> {
-      // İlk giriş sırasında user bilgilerini token'a ekle
+    async jwt({ token, account, user }) {
       if (account && user) {
         token.accessToken = account.access_token;
-        // Auth0'dan gelen role bilgisini kontrol et
         token.role = getUserRole(user.email);
-        token.permissions = getRolePermissions(token.role);
+        token.permissions = getRolePermissions(token.role as UserRole);
       }
-
-      return token as ExtendedJWT;
+      return token;
     },
 
-    async session({ session, token }): Promise<ExtendedSession> {
-      const extendedSession = session as ExtendedSession;
-
-      if (token) {
-        extendedSession.user.role = token.role;
-        extendedSession.user.permissions = token.permissions;
-        extendedSession.accessToken = token.accessToken;
+    async session({ session, token }) {
+      if (token && session.user) {
+        session.user.id = token.sub!;
+        session.user.role = token.role as UserRole;
+        session.user.permissions = token.permissions as string[];
+        session.accessToken = token.accessToken as string;
       }
-
-      return extendedSession;
+      return session;
     },
   },
 
@@ -61,16 +50,21 @@ export const authOptions: NextAuthOptions = {
   debug: process.env.NODE_ENV === "development",
 };
 
-// Basit rol belirleme - gerçek uygulamada DB'den gelecek
+// admin/user rol sistemi
 function getUserRole(email?: string | null): UserRole {
   if (!email) return UserRole.USER;
 
-  const adminEmails = ["admin@example.com"];
+  const adminEmails = [
+    "admin@example.com",
+    "admin@test.com",
+    //...
+  ];
+
   return adminEmails.includes(email) ? UserRole.ADMIN : UserRole.USER;
 }
 
-// Rol bazlı yetki belirleme
-function getRolePermissions(role?: UserRole): string[] {
+// Rol bazlı yetkilendirme
+function getRolePermissions(role: UserRole): string[] {
   switch (role) {
     case UserRole.ADMIN:
       return ["read", "write", "delete", "admin"];
